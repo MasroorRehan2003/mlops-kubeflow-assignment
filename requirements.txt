@@ -5,7 +5,4 @@ scikit-learn
 pandas
 numpy
 joblib
-mlruns/
-pandas
-scikit-learn
 mlflow
