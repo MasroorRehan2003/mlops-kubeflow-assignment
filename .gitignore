@@ -1,0 +1,10 @@
+# DVC cache
+/.dvc/cache/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
