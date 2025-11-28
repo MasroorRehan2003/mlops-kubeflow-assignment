@@ -1,0 +1,367 @@
+# PIPELINE DEFINITION
+# Name: housing-classification-pipeline
+# Description: End-to-end ML pipeline using DVC + KFP v2
+# Inputs:
+#    dvc_path: str [Default: 'data/raw_data.csv']
+#    n_estimators: int [Default: 100.0]
+#    repo_url: str [Default: 'https://github.com/MasroorRehan2003/mlops-kubeflow-assignment']
+#    rev: str [Default: 'main']
+#    test_size: float [Default: 0.2]
+components:
+  comp-data-extraction:
+    executorLabel: exec-data-extraction
+    inputDefinitions:
+      parameters:
+        dvc_path:
+          parameterType: STRING
+        repo_url:
+          parameterType: STRING
+        rev:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-data-preprocessing:
+    executorLabel: exec-data-preprocessing
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        test_size:
+          defaultValue: 0.2
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        x_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        x_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-model-evaluation:
+    executorLabel: exec-model-evaluation
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        x_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+  comp-model-training:
+    executorLabel: exec-model-training
+    inputDefinitions:
+      artifacts:
+        x_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        n_estimators:
+          defaultValue: 100.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        model_output:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-data-extraction:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_extraction
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'dvc' 'pandas'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_extraction(\n    repo_url: str,\n    dvc_path: str,\n  \
+          \  rev: str,\n    output_dataset: Output[Dataset]\n):\n    \"\"\"\n    Fetch\
+          \ DVC-tracked dataset from GitHub.\n    \"\"\"\n    with dvc.api.open(\n\
+          \        path=dvc_path,\n        repo=repo_url,\n        rev=rev,\n    \
+          \    mode=\"r\",\n    ) as f:\n        df = pd.read_csv(f)\n\n    df.to_csv(output_dataset.path,\
+          \ index=False)\n    print(\"Saved extracted dataset to:\", output_dataset.path)\n\
+          \n"
+        image: python:3.10
+    exec-data-preprocessing:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_preprocessing
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_preprocessing(\n    input_dataset: Input[Dataset],\n   \
+          \ x_train: Output[Dataset],\n    x_test: Output[Dataset],\n    y_train:\
+          \ Output[Dataset],\n    y_test: Output[Dataset],\n    test_size: float =\
+          \ 0.2,\n    random_state: int = 42,\n):\n    \"\"\"\n    Convert regression\
+          \ target to classification (above/below median).\n    \"\"\"\n    df = pd.read_csv(input_dataset.path)\n\
+          \n    X = df.iloc[:, :-1]\n    y_cont = df.iloc[:, -1]\n\n    y_bin = (y_cont\
+          \ > y_cont.median()).astype(int)\n\n    X_train, X_test, y_train_split,\
+          \ y_test_split = train_test_split(\n        X, y_bin, test_size=test_size,\
+          \ random_state=random_state, stratify=y_bin\n    )\n\n    X_train.to_csv(x_train.path,\
+          \ index=False)\n    X_test.to_csv(x_test.path, index=False)\n    y_train_split.to_csv(y_train.path,\
+          \ index=False)\n    y_test_split.to_csv(y_test.path, index=False)\n\n  \
+          \  print(\"Preprocessing complete.\")\n\n"
+        image: python:3.10
+    exec-model-evaluation:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - model_evaluation
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'joblib'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef model_evaluation(\n    model: Input[Model],\n    x_test: Input[Dataset],\n\
+          \    y_test: Input[Dataset],\n    metrics: Output[Metrics],\n):\n    X_test\
+          \ = pd.read_csv(x_test.path)\n    y_test_df = pd.read_csv(y_test.path).values.ravel()\n\
+          \n    clf = joblib.load(model.path)\n    y_pred = clf.predict(X_test)\n\n\
+          \    acc = accuracy_score(y_test_df, y_pred)\n    f1 = f1_score(y_test_df,\
+          \ y_pred)\n\n    metrics.log_metric(\"accuracy\", float(acc))\n    metrics.log_metric(\"\
+          f1_score\", float(f1))\n\n    print(\"Accuracy:\", acc)\n    print(\"F1\
+          \ Score:\", f1)\n\n"
+        image: python:3.10
+    exec-model-training:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - model_training
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'joblib'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef model_training(\n    x_train: Input[Dataset],\n    y_train: Input[Dataset],\n\
+          \    model_output: Output[Model],\n    n_estimators: int = 100,\n    random_state:\
+          \ int = 42,\n):\n    X_train = pd.read_csv(x_train.path)\n    y_train_df\
+          \ = pd.read_csv(y_train.path)\n\n    clf = RandomForestClassifier(\n   \
+          \     n_estimators=n_estimators,\n        random_state=random_state\n  \
+          \  )\n    clf.fit(X_train, y_train_df.values.ravel())\n\n    joblib.dump(clf,\
+          \ model_output.path)\n    print(\"Model saved:\", model_output.path)\n\n"
+        image: python:3.10
+pipelineInfo:
+  description: End-to-end ML pipeline using DVC + KFP v2
+  name: housing-classification-pipeline
+root:
+  dag:
+    tasks:
+      data-extraction:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-extraction
+        inputs:
+          parameters:
+            dvc_path:
+              componentInputParameter: dvc_path
+            repo_url:
+              componentInputParameter: repo_url
+            rev:
+              componentInputParameter: rev
+        taskInfo:
+          name: data-extraction
+      data-preprocessing:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-preprocessing
+        dependentTasks:
+        - data-extraction
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: data-extraction
+          parameters:
+            test_size:
+              componentInputParameter: test_size
+        taskInfo:
+          name: data-preprocessing
+      model-evaluation:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-model-evaluation
+        dependentTasks:
+        - data-preprocessing
+        - model-training
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model_output
+                producerTask: model-training
+            x_test:
+              taskOutputArtifact:
+                outputArtifactKey: x_test
+                producerTask: data-preprocessing
+            y_test:
+              taskOutputArtifact:
+                outputArtifactKey: y_test
+                producerTask: data-preprocessing
+        taskInfo:
+          name: model-evaluation
+      model-training:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-model-training
+        dependentTasks:
+        - data-preprocessing
+        inputs:
+          artifacts:
+            x_train:
+              taskOutputArtifact:
+                outputArtifactKey: x_train
+                producerTask: data-preprocessing
+            y_train:
+              taskOutputArtifact:
+                outputArtifactKey: y_train
+                producerTask: data-preprocessing
+          parameters:
+            n_estimators:
+              componentInputParameter: n_estimators
+        taskInfo:
+          name: model-training
+  inputDefinitions:
+    parameters:
+      dvc_path:
+        defaultValue: data/raw_data.csv
+        isOptional: true
+        parameterType: STRING
+      n_estimators:
+        defaultValue: 100.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      repo_url:
+        defaultValue: https://github.com/MasroorRehan2003/mlops-kubeflow-assignment
+        isOptional: true
+        parameterType: STRING
+      rev:
+        defaultValue: main
+        isOptional: true
+        parameterType: STRING
+      test_size:
+        defaultValue: 0.2
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.15.1
